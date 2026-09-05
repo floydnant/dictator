@@ -7,6 +7,9 @@ import SwiftUI
 /// Both entry kinds live in one list rather than separate tabs — they're two shapes of the
 /// same idea and you want to see everything you've taught it at once. The kind is carried by
 /// a silkscreen tag on each row.
+/// `@MainActor` is explicit because the macOS 14 SDK's `View` isn't main-actor isolated:
+/// helpers outside `body` that read `Settings`/`DictationController` need the annotation.
+@MainActor
 struct DictionaryPanel: View {
     @State private var store = DictionaryStore.shared
     @State private var query = ""

@@ -2,19 +2,20 @@ import Foundation
 import Observation
 
 /// Which speech engine transcribes an utterance.
+///
+/// Only Parakeet on macOS 14: Apple's `SpeechTranscriber` needs macOS 26. The enum is kept
+/// (rather than collapsed away) because the engine picker and the run log both store it.
 enum SpeechEngineChoice: String, CaseIterable, Sendable {
-    case apple
     case parakeet
 
     var displayName: String {
         switch self {
-        case .apple: "Apple (streaming)"
-        case .parakeet: "Parakeet (batch)"
+        case .parakeet: return "Parakeet (batch)"
         }
     }
 
-    /// Apple shows text while you talk; Parakeet only resolves on release.
-    var showsLiveText: Bool { self == .apple }
+    /// Parakeet only resolves on release, so there is never live text to show.
+    var showsLiveText: Bool { false }
 }
 
 @MainActor
@@ -72,8 +73,7 @@ final class Settings {
     private init() {
         let raw = defaults.string(forKey: Keys.pushToTalkKey) ?? PushToTalkKey.rightOption.rawValue
         pushToTalkKey = PushToTalkKey(rawValue: raw) ?? .rightOption
-        // Apple by default: no download, no dependency, live text while speaking.
-        engine = SpeechEngineChoice(rawValue: defaults.string(forKey: Keys.engine) ?? "") ?? .apple
+        engine = SpeechEngineChoice(rawValue: defaults.string(forKey: Keys.engine) ?? "") ?? .parakeet
         cleanupEnabled = defaults.object(forKey: Keys.cleanupEnabled) as? Bool ?? true
         smartCleanup = defaults.object(forKey: Keys.smartCleanup) as? Bool ?? false
         compareMode = defaults.object(forKey: Keys.compareMode) as? Bool ?? false

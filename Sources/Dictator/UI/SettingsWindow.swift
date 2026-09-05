@@ -38,7 +38,7 @@ struct SettingsWindow: View {
                     HStack(spacing: DS.Space.snug) {
                         ForEach(SpeechEngineChoice.allCases, id: \.self) { choice in
                             TransportKey(
-                                title: choice == .apple ? "Apple" : "Parakeet",
+                                title: "Parakeet",
                                 isEngaged: settings.engine == choice,
                                 engagedColor: DS.Color.ink
                             ) {
@@ -52,9 +52,7 @@ struct SettingsWindow: View {
                             }
                         }
                     }
-                    note(settings.engine == .apple
-                        ? "Apple's on-device transcriber. Streams text while you speak; no download."
-                        : "Parakeet on the Neural Engine. Resolves on release; ~470 MB model.")
+                    note("Parakeet on the Neural Engine. Resolves on release; ~470 MB model.")
                 }
 
                 panel(label: "Cleanup") {

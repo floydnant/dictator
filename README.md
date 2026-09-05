@@ -149,15 +149,14 @@ Sources/Dictator/
 
 ## Speech engine
 
-Default is Apple's **`SpeechAnalyzer` / `SpeechTranscriber`**, new in macOS 26: no
-dependency, no bundled model, no cloud path, real streaming with `.volatileResults` so
-text appears while you're still talking. The OS downloads and manages model assets, so the
-first run for a locale may pause on `AssetInstallationRequest`.
+The engine is **Parakeet v3** via FluidAudio (CoreML on the Neural Engine) — best-in-class
+English WER, ~110× realtime, ~66 MB resident, ~470 MB downloaded once on first use. It is
+batch, not streaming: audio is accumulated while the key is held and transcribed in one
+pass on release, so there is no live text in the HUD.
 
-The intended upgrade is **Parakeet v3** via FluidAudio (CoreML on the Neural Engine) —
-measurably better English WER, ~110× realtime, ~66 MB resident. Implementing
-`TranscriptionEngine` is the entire cost of switching; `DictationController` doesn't
-change.
+Apple's **`SpeechAnalyzer` / `SpeechTranscriber`** — no dependency, no bundled model, real
+streaming — needs macOS 26 and is therefore not part of this build, which targets macOS 14.
+`TranscriptionEngine` is the seam it plugs back into; nothing else has to change.
 
 | | Apple SpeechTranscriber | Parakeet v3 (FluidAudio) | Whisper large-v3 (WhisperKit) |
 |---|---|---|---|

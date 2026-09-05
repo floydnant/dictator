@@ -1,22 +1,20 @@
-// swift-tools-version: 6.2
+// swift-tools-version: 5.10
 import PackageDescription
 
 let package = Package(
     name: "Dictator",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS(.v14)],
     dependencies: [
-        // Parakeet TDT as CoreML on the Neural Engine. Optional at runtime — Apple's
-        // SpeechTranscriber remains the default and needs no dependency at all.
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.6")
+        // Parakeet TDT as CoreML on the Neural Engine. The only engine on macOS 14,
+        // because Apple's SpeechTranscriber needs macOS 26. This is the last release
+        // whose manifest Swift 5.10 can read.
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.8.2")
     ],
     targets: [
-        // The dictionary is its own target so it can be tested directly, and because its
-        // behaviour is a cross-platform contract: the Windows app reimplements this logic in
-        // C#, and both sides run the same vectors in shared/dictionary-test-vectors.json.
+        // Both macOS and Windows run the vectors in shared/dictionary-test-vectors.json.
         .target(
             name: "DictatorDictionary",
-            path: "Sources/DictatorDictionary",
-            swiftSettings: [.swiftLanguageMode(.v6)]
+            path: "Sources/DictatorDictionary"
         ),
         .executableTarget(
             name: "Dictator",
@@ -24,17 +22,13 @@ let package = Package(
                 "DictatorDictionary",
                 .product(name: "FluidAudio", package: "FluidAudio"),
             ],
-            path: "Sources/Dictator",
-            swiftSettings: [
-                .swiftLanguageMode(.v6)
-            ]
+            path: "Sources/Dictator"
         ),
         .testTarget(
             name: "DictatorDictionaryTests",
             dependencies: ["DictatorDictionary"],
             path: "Tests/DictatorDictionaryTests",
-            resources: [.copy("dictionary-test-vectors.json")],
-            swiftSettings: [.swiftLanguageMode(.v6)]
+            resources: [.copy("dictionary-test-vectors.json")]
         ),
     ]
 )
