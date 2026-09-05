@@ -73,9 +73,10 @@ actor ParakeetEngine: TranscriptionEngine {
 
         do {
             let manager = try await ParakeetModels.shared.manager()
-            var decoderState = try TdtDecoderState()
             let started = Date()
-            let result = try await manager.transcribe(samples, decoderState: &decoderState)
+            // `transcribe(_:source:)` owns the decoder state and resets it per call, so each
+            // utterance is independent without threading a state value through here.
+            let result = try await manager.transcribe(samples)
             let elapsed = Date().timeIntervalSince(started)
             let audioSeconds = Double(samples.count) / 16_000
 
@@ -116,7 +117,7 @@ actor ParakeetModels {
     nonisolated static var isDownloaded: Bool {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let encoder = support
-            .appendingPathComponent("FluidAudio/Models/parakeet-tdt-0.6b-v3/Encoder.mlmodelc")
+            .appendingPathComponent("FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml/Encoder.mlmodelc")
         return FileManager.default.fileExists(atPath: encoder.path)
     }
 
@@ -138,9 +139,9 @@ actor ParakeetModels {
                 : "downloading models (~470 MB, one time)"
             Log.speech.info("Parakeet: \(stage, privacy: .public)")
             let started = Date()
-            let models = try await AsrModels.downloadAndLoad(version: .v3, encoderPrecision: .int8)
+            let models = try await AsrModels.downloadAndLoad(version: .v3)
             let manager = AsrManager(config: .default)
-            try await manager.loadModels(models)
+            try await manager.initialize(models: models)
             Log.speech.info("Parakeet: ready in \(Date().timeIntervalSince(started), format: .fixed(precision: 1))s")
             return manager
         }

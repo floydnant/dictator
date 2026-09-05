@@ -15,8 +15,7 @@ func engineForCurrentSetting() -> any TranscriptionEngine {
     // Always invoked from `beginDictation`, which runs on the main actor.
     MainActor.assumeIsolated {
         switch Settings.shared.engine {
-        case .apple: AppleSpeechEngine()
-        case .parakeet: ParakeetEngine()
+        case .parakeet: return ParakeetEngine()
         }
     }
 }
@@ -172,14 +171,9 @@ final class DictationController {
                     chunks = try await selected.start()
                 }
 
-                // Compare mode captures in *Apple's* format, not a format of our choosing.
-                //
-                // SpeechAnalyzer enforces `Audio sample data must be 16-bit signed integers`
-                // as a hard precondition — feeding it float32 doesn't fail gracefully, it
-                // kills the process. Parakeet is the flexible one (its `feed` converts
-                // int16/int32/float32), so the strict engine picks the format and the
-                // tolerant engine adapts. Both still replay the identical buffers.
-                let formatOwner: any TranscriptionEngine = engine ?? AppleSpeechEngine()
+                // Compare mode records in Parakeet's input format, then replays those
+                // buffers through each comparison path after release.
+                let formatOwner: any TranscriptionEngine = engine ?? ParakeetEngine()
                 guard let format = await formatOwner.preferredInputFormat() else {
                     throw TranscriptionError.noAudioFormat
                 }
@@ -211,7 +205,7 @@ final class DictationController {
                         audioContinuation.yield(chunk)
                     },
                     onLevel: { [weak self] level in
-                        Task { @MainActor in self?.updateLevel(level) }
+                        Task { @MainActor [weak self] in self?.updateLevel(level) }
                     }
                 )
 

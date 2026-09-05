@@ -308,10 +308,11 @@ struct VUMeter: View {
     }
 
     private func point(from origin: CGPoint, angle: Double, distance: CGFloat) -> CGPoint {
-        CGPoint(
-            x: origin.x + sin(angle) * distance,
-            y: origin.y - cos(angle) * distance
-        )
+        // Spelled out rather than inline: with both Double and CGFloat overloads of `sin`
+        // in scope, the inline form is ambiguous to the Swift 5 type checker.
+        let dx = CGFloat(sin(angle)) * distance
+        let dy = CGFloat(cos(angle)) * distance
+        return CGPoint(x: origin.x + dx, y: origin.y - dy)
     }
 }
 

@@ -13,9 +13,9 @@ whatever had focus. Two independent implementations:
 
 | | macOS | Windows |
 |---|---|---|
-| Language | Swift 6 | C# / .NET 10 |
+| Language | Swift 5 (macOS 14 target) | C# / .NET 10 |
 | UI | SwiftUI | Avalonia |
-| Speech | Apple `SpeechAnalyzer`, or Parakeet via FluidAudio | Parakeet via sherpa-onnx |
+| Speech | Parakeet via FluidAudio | Parakeet via sherpa-onnx |
 | Location | repo root | `windows/` |
 
 **The macOS app works and is in daily use.**

@@ -1,5 +1,5 @@
 import Foundation
-import Testing
+import XCTest
 
 @testable import DictatorDictionary
 
@@ -8,7 +8,7 @@ import Testing
 /// The Windows app reimplements this logic in C# and runs the identical file. That's the
 /// only thing keeping two independent implementations honest — there's no shared binary, and
 /// no Windows machine to check against by hand.
-struct VectorTests {
+final class VectorTests: XCTestCase {
     struct Vectors: Decodable {
         let version: Int
         let cases: [Case]
@@ -43,66 +43,61 @@ struct VectorTests {
         let count: Int
     }
 
-    static func load() throws -> Vectors {
-        let url = try #require(
+    static func loadVectors() throws -> Vectors {
+        let url = try XCTUnwrap(
             Bundle.module.url(forResource: "dictionary-test-vectors", withExtension: "json")
         )
         return try JSONDecoder().decode(Vectors.self, from: Data(contentsOf: url))
     }
 
-    @Test("every shared vector produces the contracted output")
-    func vectors() throws {
-        let vectors = try Self.load()
-        #expect(vectors.cases.isEmpty == false)
+    func testVectors() throws {
+        let vectors = try Self.loadVectors()
+        XCTAssertTrue(vectors.cases.isEmpty == false)
 
         for testCase in vectors.cases {
-            let corrector = DictionaryCorrector(entries: testCase.entries.map(\.asEntry))
+            let corrector = DictionaryCorrector(entries: testCase.entries.map { $0.asEntry })
             let (text, applied) = corrector.apply(to: testCase.input)
 
-            #expect(text == testCase.expected, "\(testCase.name): text")
-            #expect(
+            XCTAssertTrue(text == testCase.expected, "\(testCase.name): text")
+            XCTAssertTrue(
                 applied.count == testCase.expectedCorrections.count,
-                "\(testCase.name): correction count — got \(applied.map(\.to))"
+                "\(testCase.name): correction count — got \(applied.map { $0.to })"
             )
 
             // Order-insensitive: which rule fires first is an implementation detail of the
             // longest-first sort, but *what* fired and how often is contractual.
             for expected in testCase.expectedCorrections {
                 let match = applied.first { $0.to == expected.to }
-                #expect(match != nil, "\(testCase.name): expected a correction to “\(expected.to)”")
-                #expect(match?.count == expected.count, "\(testCase.name): count for “\(expected.to)”")
+                XCTAssertTrue(match != nil, "\(testCase.name): expected a correction to “\(expected.to)”")
+                XCTAssertTrue(match?.count == expected.count, "\(testCase.name): count for “\(expected.to)”")
             }
         }
     }
 
-    @Test("bias list is capped and de-duplicated")
-    func biasList() {
+    func testBiasList() {
         let entries = (0..<100).map { DictionaryEntry.term("Word\($0)") }
             + [DictionaryEntry.term("Word0")]
         let phrases = DictionaryCorrector.biasPhrases(from: entries)
 
-        #expect(phrases.count == DictionaryCorrector.biasLimit)
-        #expect(Set(phrases).count == phrases.count)
+        XCTAssertTrue(phrases.count == DictionaryCorrector.biasLimit)
+        XCTAssertTrue(Set(phrases).count == phrases.count)
     }
 
-    @Test("disabled entries are excluded from biasing")
-    func biasSkipsDisabled() {
+    func testBiasSkipsDisabled() {
         let entries = [
             DictionaryEntry(kind: .term, write: "Kept"),
             DictionaryEntry(kind: .term, write: "Skipped", isEnabled: false),
         ]
-        #expect(DictionaryCorrector.biasPhrases(from: entries) == ["Kept"])
+        XCTAssertTrue(DictionaryCorrector.biasPhrases(from: entries) == ["Kept"])
     }
 
-    @Test("an ordinary word used as a trigger is flagged")
-    func warnsOnCommonWord() {
+    func testWarnsOnCommonWord() {
         let entry = DictionaryEntry.correction(hear: "cloud", write: "Claude")
-        #expect(DictionaryWarning.check(entry).isEmpty == false)
+        XCTAssertTrue(DictionaryWarning.check(entry).isEmpty == false)
     }
 
-    @Test("a distinctive phrase is not flagged")
-    func doesNotWarnOnDistinctivePhrase() {
+    func testDoesNotWarnOnDistinctivePhrase() {
         let entry = DictionaryEntry.correction(hear: "clawed code", write: "Claude Code")
-        #expect(DictionaryWarning.check(entry).isEmpty)
+        XCTAssertTrue(DictionaryWarning.check(entry).isEmpty)
     }
 }

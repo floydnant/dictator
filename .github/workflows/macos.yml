@@ -24,9 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Package.swift declares swift-tools-version 6.2, but the runner defaults to an
-      # older Xcode (Swift 6.1) and fails to even parse the manifest. Select the newest
-      # Xcode present rather than pinning a version that will age out of the image.
+      # Package.swift declares swift-tools-version 5.10, which any current runner can
+      # parse. Selecting the newest Xcode anyway keeps the SDK ahead of the manifest
+      # rather than pinning a version that will age out of the image.
       - name: Select the newest Xcode
         run: |
           latest=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
@@ -36,9 +36,9 @@ jobs:
       - name: Swift version
         run: swift --version
 
-      # The app target needs macOS 26 and the Speech framework, which the runner image
-      # does not have. The dictionary target is deliberately platform-neutral, so it — and
-      # the contract that matters here — builds and tests anywhere.
+      # Only the dictionary target is tested here: it is deliberately platform-neutral,
+      # and it carries the contract that matters. The app target pulls in FluidAudio and
+      # a 470 MB model download, which has no place in a contract check.
       - name: Test the dictionary target
         run: swift test --filter VectorTests
 

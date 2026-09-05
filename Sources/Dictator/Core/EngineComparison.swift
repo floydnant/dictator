@@ -11,9 +11,9 @@ struct ComparisonResult: Sendable {
 /// Runs the *same* captured audio through every engine, so a single hold produces a
 /// directly comparable set of outputs.
 ///
-/// Both engines are driven in batch from the identical buffer. Apple's engine can stream,
-/// and does during normal dictation — but replaying a fixed buffer into both is the only
-/// way to get numbers that mean the same thing on both sides.
+/// On macOS 14 the only local engine is Parakeet, so a comparison run is Parakeet against
+/// Wispr Flow (filed separately by the caller). Every engine is still driven in batch from
+/// the identical buffer, which is the only way to get numbers that mean the same thing.
 enum EngineComparison {
     /// - Parameter onResult: called as each engine finishes, so the UI can show results
     ///   incrementally instead of waiting for the whole set.
@@ -26,7 +26,6 @@ enum EngineComparison {
         // contaminate each other's timings. So this is not a live race — each engine is
         // timed in isolation and the *measured* durations are what get compared.
         for (name, engine) in [
-            ("Apple", AppleSpeechEngine() as any TranscriptionEngine),
             ("Parakeet", ParakeetEngine() as any TranscriptionEngine),
         ] {
             let result = await measure(name: name, engine: engine, chunks: chunks)

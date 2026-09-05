@@ -15,6 +15,9 @@ enum Brand {
     }
 }
 
+/// `@MainActor` is explicit because the macOS 14 SDK's `View` isn't main-actor isolated:
+/// helpers outside `body` that read `Settings`/`DictationController` need the annotation.
+@MainActor
 struct HUDView: View {
     @Bindable var controller: DictationController
 

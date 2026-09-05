@@ -72,6 +72,9 @@ struct MainWindow: View {
 // MARK: - Transport
 
 /// Record / stop, the level meter, and the counter — the top of the unit.
+/// `@MainActor` is explicit because the macOS 14 SDK's `View` isn't main-actor isolated:
+/// helpers outside `body` that read `Settings`/`DictationController` need the annotation.
+@MainActor
 private struct TransportPanel: View {
     @Bindable var controller: DictationController
 
@@ -152,6 +155,9 @@ private struct TransportPanel: View {
 // MARK: - Transcriptions
 
 /// Past transcriptions, searchable, each copyable.
+/// `@MainActor` is explicit because the macOS 14 SDK's `View` isn't main-actor isolated:
+/// helpers outside `body` that read `Settings`/`DictationController` need the annotation.
+@MainActor
 private struct TranscriptionList: View {
     @State private var store = RunStore.shared
     @State private var query = ""
