@@ -1,0 +1,16 @@
+{
+  "solution": {
+    "path": "Dictator.sln",
+    "projects": [
+      "src\\Dictator.Abstractions\\Dictator.Abstractions.csproj",
+      "src\\Dictator.App\\Dictator.App.csproj",
+      "src\\Dictator.Core\\Dictator.Core.csproj",
+      "src\\Dictator.Dictionary\\Dictator.Dictionary.csproj",
+      "src\\Dictator.Speech\\Dictator.Speech.csproj",
+      "src\\Dictator.Testing\\Dictator.Testing.csproj",
+      "tests\\Dictator.App.Tests\\Dictator.App.Tests.csproj",
+      "tests\\Dictator.Core.Tests\\Dictator.Core.Tests.csproj",
+      "tests\\Dictator.Dictionary.Tests\\Dictator.Dictionary.Tests.csproj"
+    ]
+  }
+}
