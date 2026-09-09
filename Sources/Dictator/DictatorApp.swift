@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // dictation touches them first — so the first hold after every launch would stall
         // with the HUD showing nothing. Warm them in the background instead, but only when
         // they're actually going to be used and are already downloaded.
-        let willUseParakeet = Settings.shared.compareMode || Settings.shared.engine == .parakeet
+        let willUseParakeet = Settings.shared.engine == .parakeet
         if willUseParakeet, ParakeetModels.isDownloaded {
             Task.detached(priority: .utility) {
                 _ = try? await ParakeetModels.shared.manager()
@@ -131,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } onChange: { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
-                if self.controller.state.isActive {
+                if self.controller.state.shouldShowHUD {
                     self.hud?.present()
                 } else {
                     self.hud?.dismiss()

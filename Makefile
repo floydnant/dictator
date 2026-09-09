@@ -24,10 +24,14 @@ CONTENTS := $(BUNDLE)/Contents
 
 ## TCC keys the Accessibility grant to the code signature, so an ad-hoc signature — which
 ## changes on every build — makes the user re-grant after every `make`. Signing with a
-## stable Developer ID keeps the identity constant and the grant sticky. Falls back to
-## ad-hoc ("-") on a machine without the cert.
-SIGN_ID := $(shell security find-identity -v -p codesigning 2>/dev/null \
+## stable Developer ID or Apple Development certificate keeps the identity constant and
+## the grant sticky. Distribution builds prefer Developer ID. Local builds can use Apple
+## Development. Falls back to ad-hoc ("-") only when neither exists.
+DEVELOPER_ID := $(shell security find-identity -v -p codesigning 2>/dev/null \
              | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)".*/\1/')
+DEVELOPMENT_ID := $(shell security find-identity -v -p codesigning 2>/dev/null \
+             | grep "Apple Development:" | head -1 | sed -E 's/.*"(.*)".*/\1/')
+SIGN_ID := $(if $(strip $(DEVELOPER_ID)),$(DEVELOPER_ID),$(if $(strip $(DEVELOPMENT_ID)),$(DEVELOPMENT_ID),-))
 ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif

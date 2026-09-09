@@ -1,19 +1,24 @@
+import AudioToolbox
 import AVFoundation
+import CoreAudio
 import Foundation
 
 /// Microphone capture with on-the-fly conversion to whatever format the speech engine wants.
 ///
-/// The tap runs on a real-time audio thread, so everything it touches lives behind
-/// `nonisolated(unsafe)` and is only ever mutated from that one thread.
+/// This uses an input-only AUHAL rather than `AVAudioEngine`. On macOS, `AVAudioEngine`
+/// opens both the default input and output devices even when the graph only has an input
+/// tap. If the output is AirPlay, Core Audio builds an aggregate device and can spend four
+/// seconds trying to start it before failing. Dictation has no output path, so it should not
+/// depend on the selected speaker at all.
 final class AudioCapture: @unchecked Sendable {
-    private let engine = AVAudioEngine()
+    private nonisolated(unsafe) var audioUnit: AudioUnit?
+    private nonisolated(unsafe) var nativeFormat: AVAudioFormat?
     private nonisolated(unsafe) var converter: AVAudioConverter?
     private nonisolated(unsafe) var outputFormat: AVAudioFormat?
+    private nonisolated(unsafe) var didLogRenderFailure = false
     private var isRunning = false
 
-    /// Called on the audio thread with each converted buffer.
     private nonisolated(unsafe) var onBuffer: (@Sendable (AudioChunk) -> Void)?
-    /// Called on the audio thread with a 0…1 RMS level, for the HUD waveform.
     private nonisolated(unsafe) var onLevel: (@Sendable (Float) -> Void)?
 
     func start(
@@ -23,48 +28,180 @@ final class AudioCapture: @unchecked Sendable {
     ) throws {
         guard !isRunning else { return }
 
-        self.onBuffer = onBuffer
-        self.onLevel = onLevel
-        self.outputFormat = outputFormat
-
-        let input = engine.inputNode
-        let nativeFormat = input.outputFormat(forBus: 0)
-
-        converter = nativeFormat == outputFormat
-            ? nil
-            : AVAudioConverter(from: nativeFormat, to: outputFormat)
-
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 2048, format: nativeFormat) { [weak self] buffer, _ in
-            self?.handle(buffer)
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Output,
+            componentSubType: kAudioUnitSubType_HALOutput,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0,
+            componentFlagsMask: 0
+        )
+        guard let component = AudioComponentFindNext(nil, &description) else {
+            throw CaptureError.componentUnavailable
         }
 
-        engine.prepare()
-        try engine.start()
-        isRunning = true
-        Log.audio.info("capture started — native \(nativeFormat.sampleRate)Hz → engine \(outputFormat.sampleRate)Hz")
+        var candidate: AudioUnit?
+        try Self.check(
+            AudioComponentInstanceNew(component, &candidate),
+            operation: "create the microphone input"
+        )
+        guard let unit = candidate else { throw CaptureError.componentUnavailable }
+
+        do {
+            var enabled: UInt32 = 1
+            try Self.check(
+                AudioUnitSetProperty(
+                    unit,
+                    kAudioOutputUnitProperty_EnableIO,
+                    kAudioUnitScope_Input,
+                    1,
+                    &enabled,
+                    UInt32(MemoryLayout.size(ofValue: enabled))
+                ),
+                operation: "enable microphone input"
+            )
+
+            // AUHAL defaults to output-only. Turning output off is the important part: the
+            // current AirPlay speaker can disappear or stall without touching this unit.
+            var disabled: UInt32 = 0
+            try Self.check(
+                AudioUnitSetProperty(
+                    unit,
+                    kAudioOutputUnitProperty_EnableIO,
+                    kAudioUnitScope_Output,
+                    0,
+                    &disabled,
+                    UInt32(MemoryLayout.size(ofValue: disabled))
+                ),
+                operation: "disable unused audio output"
+            )
+
+            var device = try Self.defaultInputDevice()
+            try Self.check(
+                AudioUnitSetProperty(
+                    unit,
+                    kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global,
+                    0,
+                    &device,
+                    UInt32(MemoryLayout.size(ofValue: device))
+                ),
+                operation: "select the default microphone"
+            )
+
+            var streamDescription = AudioStreamBasicDescription()
+            var streamDescriptionSize = UInt32(MemoryLayout.size(ofValue: streamDescription))
+            try Self.check(
+                AudioUnitGetProperty(
+                    unit,
+                    kAudioUnitProperty_StreamFormat,
+                    kAudioUnitScope_Input,
+                    1,
+                    &streamDescription,
+                    &streamDescriptionSize
+                ),
+                operation: "read the microphone format"
+            )
+            // The client side of a fresh AUHAL defaults to 44.1 kHz stereo, regardless of
+            // the microphone. Asking a mono 48 kHz device to render into that untouched
+            // format fails every callback with kAudioUnitErr_CannotDoInCurrentContext.
+            // Use the device format here. `AVAudioConverter` below handles the speech
+            // engine's format separately.
+            try Self.check(
+                AudioUnitSetProperty(
+                    unit,
+                    kAudioUnitProperty_StreamFormat,
+                    kAudioUnitScope_Output,
+                    1,
+                    &streamDescription,
+                    streamDescriptionSize
+                ),
+                operation: "configure the microphone format"
+            )
+            guard let nativeFormat = AVAudioFormat(streamDescription: &streamDescription) else {
+                throw CaptureError.invalidInputFormat
+            }
+
+            self.audioUnit = unit
+            self.nativeFormat = nativeFormat
+            self.outputFormat = outputFormat
+            converter = nativeFormat == outputFormat
+                ? nil
+                : AVAudioConverter(from: nativeFormat, to: outputFormat)
+            self.onBuffer = onBuffer
+            self.onLevel = onLevel
+            didLogRenderFailure = false
+
+            var callback = AURenderCallbackStruct(
+                inputProc: dictatorInputCallback,
+                inputProcRefCon: Unmanaged.passUnretained(self).toOpaque()
+            )
+            try Self.check(
+                AudioUnitSetProperty(
+                    unit,
+                    kAudioOutputUnitProperty_SetInputCallback,
+                    kAudioUnitScope_Global,
+                    0,
+                    &callback,
+                    UInt32(MemoryLayout.size(ofValue: callback))
+                ),
+                operation: "install the microphone callback"
+            )
+
+            try Self.check(AudioUnitInitialize(unit), operation: "initialize the microphone")
+            try Self.check(AudioOutputUnitStart(unit), operation: "start the microphone")
+            isRunning = true
+            Log.audio.info(
+                "capture started - native \(nativeFormat.sampleRate)Hz/\(nativeFormat.channelCount)ch -> engine \(outputFormat.sampleRate)Hz/\(outputFormat.channelCount)ch"
+            )
+        } catch {
+            dispose(unit)
+            throw error
+        }
     }
 
     func stop() {
-        guard isRunning else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        isRunning = false
-        converter = nil
-        onBuffer = nil
-        onLevel = nil
+        guard let unit = audioUnit else { return }
+        dispose(unit)
         Log.audio.info("capture stopped")
     }
 
     // MARK: - Audio thread
 
+    fileprivate func render(
+        flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+        timestamp: UnsafePointer<AudioTimeStamp>,
+        frameCount: UInt32
+    ) -> OSStatus {
+        guard let unit = audioUnit,
+              let nativeFormat,
+              let buffer = AVAudioPCMBuffer(pcmFormat: nativeFormat, frameCapacity: frameCount)
+        else { return kAudio_ParamError }
+
+        buffer.frameLength = frameCount
+        let status = AudioUnitRender(
+            unit,
+            flags,
+            timestamp,
+            1,
+            frameCount,
+            buffer.mutableAudioBufferList
+        )
+        guard status == noErr else {
+            if !didLogRenderFailure {
+                didLogRenderFailure = true
+                Log.audio.error("microphone render failed with Core Audio error \(status)")
+            }
+            return status
+        }
+
+        handle(buffer)
+        return noErr
+    }
+
     private func handle(_ buffer: AVAudioPCMBuffer) {
         onLevel?(Self.rms(of: buffer))
-
         guard let outputFormat else { return }
 
-        // AVAudioEngine reuses the tap's buffer as soon as this returns, so the engine
-        // must never see it directly — copy when no conversion would otherwise allocate.
         guard let converter else {
             if let copy = Self.copy(buffer) {
                 onBuffer?(AudioChunk(buffer: copy))
@@ -72,12 +209,10 @@ final class AudioCapture: @unchecked Sendable {
             return
         }
 
-        // Output frame count scales with the sample-rate ratio; round up so we never clip.
         let ratio = outputFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 64
         guard let converted = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return }
 
-        // The input block runs synchronously inside `convert`, on this thread.
         nonisolated(unsafe) let input = buffer
         let consumed = Latch()
         var error: NSError?
@@ -98,7 +233,65 @@ final class AudioCapture: @unchecked Sendable {
         onBuffer?(AudioChunk(buffer: converted))
     }
 
-    /// Deep-copies a tap buffer into storage we own.
+    private func dispose(_ unit: AudioUnit) {
+        if isRunning { AudioOutputUnitStop(unit) }
+        AudioUnitUninitialize(unit)
+        AudioComponentInstanceDispose(unit)
+        audioUnit = nil
+        nativeFormat = nil
+        converter = nil
+        outputFormat = nil
+        onBuffer = nil
+        onLevel = nil
+        isRunning = false
+    }
+
+    // MARK: - Setup helpers
+
+    private static func defaultInputDevice() throws -> AudioDeviceID {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var device = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout.size(ofValue: device))
+        try check(
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                &size,
+                &device
+            ),
+            operation: "find the default microphone"
+        )
+        guard device != kAudioObjectUnknown else { throw CaptureError.noInputDevice }
+        return device
+    }
+
+    private static func check(_ status: OSStatus, operation: String) throws {
+        guard status == noErr else { throw CaptureError.coreAudio(operation, status) }
+    }
+
+    private enum CaptureError: LocalizedError {
+        case componentUnavailable
+        case invalidInputFormat
+        case noInputDevice
+        case coreAudio(String, OSStatus)
+
+        var errorDescription: String? {
+            switch self {
+            case .componentUnavailable: "macOS could not create a microphone input."
+            case .invalidInputFormat: "The selected microphone has no usable audio format."
+            case .noInputDevice: "No microphone is selected in System Settings."
+            case .coreAudio(let operation, let status):
+                "Could not \(operation) (Core Audio error \(status))."
+            }
+        }
+    }
+
     private static func copy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
         guard buffer.frameLength > 0,
               let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength)
@@ -127,10 +320,8 @@ final class AudioCapture: @unchecked Sendable {
         return copy
     }
 
-    /// One-shot flag. Only touched from the audio thread inside a synchronous call.
     private final class Latch: @unchecked Sendable {
         private var fired = false
-        /// - Returns: the value *before* this call, then latches to `true`.
         func take() -> Bool {
             defer { fired = true }
             return fired
@@ -143,14 +334,26 @@ final class AudioCapture: @unchecked Sendable {
         guard count > 0 else { return 0 }
 
         var sum: Float = 0
-        for i in 0..<count {
-            let sample = channel[i]
+        for index in 0..<count {
+            let sample = channel[index]
             sum += sample * sample
         }
         let rms = (sum / Float(count)).squareRoot()
-
-        // Map roughly -50…0 dBFS onto 0…1 so quiet speech still moves the meter.
         let db = 20 * log10(max(rms, 1e-7))
         return max(0, min(1, (db + 50) / 50))
     }
+}
+
+/// C audio callbacks cannot capture context. AUHAL hands the `AudioCapture` instance back
+/// through `inputProcRefCon`, and the unit is stopped before that instance can go away.
+private func dictatorInputCallback(
+    _ refcon: UnsafeMutableRawPointer,
+    _ flags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+    _ timestamp: UnsafePointer<AudioTimeStamp>,
+    _ busNumber: UInt32,
+    _ frameCount: UInt32,
+    _ data: UnsafeMutablePointer<AudioBufferList>?
+) -> OSStatus {
+    let capture = Unmanaged<AudioCapture>.fromOpaque(refcon).takeUnretainedValue()
+    return capture.render(flags: flags, timestamp: timestamp, frameCount: frameCount)
 }

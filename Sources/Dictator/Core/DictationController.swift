@@ -37,6 +37,13 @@ final class DictationController {
             case .idle, .error: false
             }
         }
+
+        var shouldShowHUD: Bool {
+            switch self {
+            case .starting, .listening, .finishing, .error: true
+            case .idle: false
+            }
+        }
     }
 
     private(set) var state: State = .idle
@@ -149,10 +156,20 @@ final class DictationController {
                     return
                 }
 
-                let engine = makeEngine()
-                self.engine = engine
-
-                let chunks = try await engine.start()
+                // Compare mode records once, then starts each comparison engine in turn.
+                // Starting the selected engine here used to run it once for no result and
+                // then run it again during comparison.
+                let engine: (any TranscriptionEngine)?
+                let chunks: AsyncThrowingStream<TranscriptionChunk, Error>?
+                if isComparing {
+                    engine = nil
+                    chunks = nil
+                } else {
+                    let selected = makeEngine()
+                    self.engine = selected
+                    engine = selected
+                    chunks = try await selected.start()
+                }
 
                 // Compare mode captures in *Apple's* format, not a format of our choosing.
                 //
@@ -161,7 +178,7 @@ final class DictationController {
                 // kills the process. Parakeet is the flexible one (its `feed` converts
                 // int16/int32/float32), so the strict engine picks the format and the
                 // tolerant engine adapts. Both still replay the identical buffers.
-                let formatOwner: any TranscriptionEngine = isComparing ? AppleSpeechEngine() : engine
+                let formatOwner: any TranscriptionEngine = engine ?? AppleSpeechEngine()
                 guard let format = await formatOwner.preferredInputFormat() else {
                     throw TranscriptionError.noAudioFormat
                 }
@@ -182,7 +199,7 @@ final class DictationController {
                     var recording: [AudioChunk] = []
                     for await chunk in audioStream {
                         if comparing { recording.append(chunk) }
-                        await engine.feed(chunk)
+                        if let engine { await engine.feed(chunk) }
                     }
                     return recording
                 }
@@ -206,13 +223,15 @@ final class DictationController {
                 self.state = .listening
                 if Settings.shared.soundEnabled { NSSound(named: "Tink")?.play() }
 
-                self.consumeTask = Task { @MainActor in
-                    do {
-                        for try await chunk in chunks {
-                            self.transcript = chunk.text
+                if let chunks {
+                    self.consumeTask = Task { @MainActor in
+                        do {
+                            for try await chunk in chunks {
+                                self.transcript = chunk.text
+                            }
+                        } catch {
+                            self.fail(error.localizedDescription)
                         }
-                    } catch {
-                        self.fail(error.localizedDescription)
                     }
                 }
             } catch {
@@ -307,7 +326,7 @@ final class DictationController {
         MediaPause.resumeIfPaused()
         audioContinuation?.finish()
         audioContinuation = nil
-        await feedTask?.value
+        _ = await feedTask?.value
         feedTask = nil
         await engine?.finish()
         engine = nil
@@ -427,18 +446,23 @@ final class DictationController {
     }
 
     private func fail(_ message: String) {
-        Log.app.error("\(message)")
+        Log.app.error("\(message, privacy: .public)")
         capture.stop()
         MediaPause.resumeIfPaused()
         audioContinuation?.finish()
         audioContinuation = nil
         feedTask?.cancel()
         feedTask = nil
+        let activeEngine = engine
         engine = nil
         consumeTask?.cancel()
         consumeTask = nil
         state = .error(message)
         level = 0
+
+        // A capture failure happens after the speech engine has started. Dropping our
+        // reference without finishing it leaves its analyzer and results task alive.
+        Task { await activeEngine?.finish() }
 
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
