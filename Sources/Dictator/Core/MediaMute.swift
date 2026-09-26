@@ -18,6 +18,7 @@ enum MediaMute {
     /// The tap is global, so a second source that starts during dictation is muted too.
     static func muteIfPlaying() {
         guard Settings.shared.muteMedia, tapID == kAudioObjectUnknown else { return }
+        guard #available(macOS 14.2, *) else { return }
 
         let playing = AudioActivity.outputProcesses()
         guard !playing.isEmpty else { return }
@@ -28,12 +29,15 @@ enum MediaMute {
         description.muteBehavior = .muted
 
         // The global tap is exclusive, which means its list contains the processes to leave
-        // alone. Use the bundle ID rather than a process object because Dictator may not yet
-        // have opened an output stream when recording begins.
+        // alone. Newer SDKs can exclude Dictator by bundle ID even when it has not opened an
+        // output stream yet. The macOS 14 SDK has no bundle-ID API, so Dictator's own sounds
+        // are muted too while the tap is active.
+#if compiler(>=6.0)
         if let bundleID = Bundle.main.bundleIdentifier {
             description.bundleIDs = [bundleID]
             description.isProcessRestoreEnabled = true
         }
+#endif
 
         var newTapID = AudioObjectID(kAudioObjectUnknown)
         let status = AudioHardwareCreateProcessTap(description, &newTapID)
@@ -53,6 +57,7 @@ enum MediaMute {
     /// dictation, Dictator still has to remove the tap it already created.
     static func restoreIfMuted() {
         guard tapID != kAudioObjectUnknown else { return }
+        guard #available(macOS 14.2, *) else { return }
 
         let oldTapID = tapID
         let status = AudioHardwareDestroyProcessTap(oldTapID)
