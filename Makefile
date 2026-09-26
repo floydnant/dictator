@@ -77,7 +77,19 @@ run: app
 ## Ad-hoc signatures change on every rebuild, which resets the Accessibility grant.
 ## Installing to /Applications keeps the path stable and makes re-granting a one-click fix.
 install: app
-	@pkill -x $(EXEC) 2>/dev/null || true
+	@if pgrep -x "$(EXEC)" >/dev/null 2>&1; then \
+		echo "closing $(EXEC)"; \
+		pkill -TERM -x "$(EXEC)"; \
+		attempts=0; \
+		while pgrep -x "$(EXEC)" >/dev/null 2>&1 && [ $$attempts -lt 50 ]; do \
+			sleep 0.1; \
+			attempts=$$((attempts + 1)); \
+		done; \
+		if pgrep -x "$(EXEC)" >/dev/null 2>&1; then \
+			echo "could not close $(EXEC); install aborted" >&2; \
+			exit 1; \
+		fi; \
+	fi
 	@# $(BUNDLE) is an absolute staging path — the destination must use $(APPNAME) alone.
 	@rm -rf "/Applications/$(APPNAME)"
 	@cp -R "$(BUNDLE)" "/Applications/$(APPNAME)"
