@@ -33,6 +33,10 @@ the same key both record, and whichever injects text will fight the other.
 make install     # builds, bundles, signs, copies to /Applications, launches
 ```
 
+This requires a stable **Developer ID Application** or **Apple Development** signing
+identity. If neither is installed, `make install` stops and prints the one-time Xcode setup
+steps; `make signing-help` prints the same instructions directly.
+
 Then grant two permissions — neither is optional, and neither can be requested silently:
 
 | Permission | Where | Needed for |
@@ -49,11 +53,14 @@ changes on every build, so the rebuilt binary stops satisfying the stored requir
 and the symptom is nasty: the Accessibility toggle still **shows as on** while the app is
 reported untrusted, and flipping it changes nothing because the stale row is the problem.
 
-The `Makefile` therefore signs with a stable Developer ID (auto-detected via
-`security find-identity`, falling back to ad-hoc). Verified: rebuild + reinstall keeps both
+The `Makefile` therefore auto-detects a stable Developer ID or Apple Development identity.
+It refuses to assemble an ad-hoc-signed app because installing one would silently recreate
+this failure on the next rebuild. With a stable identity, rebuild + reinstall keeps both
 grants with no re-prompt.
 
-If a grant ever does get wedged, reset that one row and re-add — never toggle:
+When switching from an existing ad-hoc build to a stably signed build, its stale permission
+rows must be removed once. The same recovery applies if a grant ever gets wedged. Install
+the signed build, then reset and re-grant Dictator only — never just toggle the stale rows:
 
 ```bash
 tccutil reset Accessibility com.floyd.dictator

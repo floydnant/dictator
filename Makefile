@@ -26,17 +26,16 @@ CONTENTS := $(BUNDLE)/Contents
 ## changes on every build — makes the user re-grant after every `make`. Signing with a
 ## stable Developer ID or Apple Development certificate keeps the identity constant and
 ## the grant sticky. Distribution builds prefer Developer ID. Local builds can use Apple
-## Development. Falls back to ad-hoc ("-") only when neither exists.
+## Development. Ad-hoc signing is deliberately not allowed for app bundles: its designated
+## requirement contains the changing binary hash, so System Settings can show Accessibility
+## as enabled while TCC rejects the rebuilt app.
 DEVELOPER_ID := $(shell security find-identity -v -p codesigning 2>/dev/null \
              | grep "Developer ID Application" | head -1 | sed -E 's/.*"(.*)".*/\1/')
 DEVELOPMENT_ID := $(shell security find-identity -v -p codesigning 2>/dev/null \
              | grep "Apple Development:" | head -1 | sed -E 's/.*"(.*)".*/\1/')
-SIGN_ID := $(if $(strip $(DEVELOPER_ID)),$(DEVELOPER_ID),$(if $(strip $(DEVELOPMENT_ID)),$(DEVELOPMENT_ID),-))
-ifeq ($(strip $(SIGN_ID)),)
-SIGN_ID := -
-endif
+SIGN_ID ?= $(if $(strip $(DEVELOPER_ID)),$(DEVELOPER_ID),$(DEVELOPMENT_ID))
 
-.PHONY: all build app run install clean icon
+.PHONY: all build app run install clean icon check-signing signing-help
 
 all: app
 
@@ -50,9 +49,23 @@ icon:
 	@iconutil -c icns Resources/AppIcon.iconset -o Resources/AppIcon.icns
 	@echo "wrote Resources/AppIcon.icns"
 
+signing-help:
+	@echo "Dictator needs a stable code-signing identity so macOS permissions survive rebuilds."
+	@echo "In Xcode: Settings > Accounts > select your Apple ID > Manage Certificates > + > Apple Development."
+	@echo "Then rerun: make install"
+	@echo "After replacing an ad-hoc build, reset only Dictator's stale Accessibility row once:"
+	@echo "  tccutil reset Accessibility com.floyd.dictator"
+	@echo "Quit System Settings completely, reopen it, and enable Dictator again."
+
+check-signing:
+	@if [ -z "$(strip $(SIGN_ID))" ] || [ "$(strip $(SIGN_ID))" = "-" ]; then \
+		$(MAKE) --no-print-directory signing-help; \
+		exit 1; \
+	fi
+
 ## Assemble a real .app bundle. TCC (microphone + Accessibility) keys on bundle identity
 ## and code signature, so the raw SwiftPM binary can't be used directly.
-app: build
+app: check-signing build
 	@rm -rf "$(BUNDLE)"
 	@mkdir -p "$(CONTENTS)/MacOS" "$(CONTENTS)/Resources"
 	@cp $(BUILD) "$(CONTENTS)/MacOS/$(EXEC)"
