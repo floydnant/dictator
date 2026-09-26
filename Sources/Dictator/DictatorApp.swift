@@ -68,6 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // before the first dictation.
         RunLog.regenerate()
 
+        // The first MediaRemote request after launch can be slow. Do it before the user
+        // reaches for push-to-talk so a pause can land before the microphone opens.
+        MediaPause.warmUp()
+
         // Parakeet's models take ~20s to load from disk, and that cost lands on whichever
         // dictation touches them first — so the first hold after every launch would stall
         // with the HUD showing nothing. Warm them in the background instead, but only when
@@ -118,10 +122,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        controller.deactivate()
+        Task { @MainActor in
+            await MediaPause.finishPendingWork()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         let isOpen = NSApp.windows.contains { $0.title == "Engine comparison" && $0.isVisible }
         UserDefaults.standard.set(isOpen, forKey: "comparisonWindowOpen")
-        controller.deactivate()
     }
 
     /// Shows and hides the HUD in step with the controller's state.
@@ -217,6 +229,7 @@ private struct MenuContent: View {
         }
 
         Toggle("Pause media while dictating", isOn: $settings.pauseMedia)
+        Toggle("Mute all audio while dictating", isOn: $settings.muteMedia)
 
         Toggle("Sound", isOn: $settings.soundEnabled)
 

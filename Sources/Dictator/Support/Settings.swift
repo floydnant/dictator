@@ -51,10 +51,25 @@ final class Settings {
         didSet { defaults.set(soundEnabled, forKey: Keys.soundEnabled) }
     }
 
-    /// Send the system play/pause key when a dictation starts, and again when it ends, if
-    /// anything was playing at the time.
+    /// Mute other processes through Core Audio while a dictation is active. Off by default
+    /// because playback continues while it is inaudible.
+    var muteMedia: Bool {
+        didSet {
+            defaults.set(muteMedia, forKey: Keys.muteMedia)
+            if muteMedia, pauseMedia { pauseMedia = false }
+        }
+    }
+
+    /// Pause the active macOS Now Playing session while a dictation is active. This uses
+    /// private MediaRemote API through Apple's `osascript`, so it remains experimental.
     var pauseMedia: Bool {
-        didSet { defaults.set(pauseMedia, forKey: Keys.pauseMedia) }
+        didSet {
+            defaults.set(pauseMedia, forKey: Keys.pauseMediaNowPlaying)
+            if pauseMedia {
+                if muteMedia { muteMedia = false }
+                MediaPause.warmUp()
+            }
+        }
     }
 
     private let defaults = UserDefaults.standard
@@ -66,7 +81,10 @@ final class Settings {
         static let engine = "engine"
         static let smartCleanup = "smartCleanup"
         static let compareMode = "compareMode"
-        static let pauseMedia = "pauseMedia"
+        static let muteMedia = "muteMedia"
+        // Do not reuse the old "pauseMedia" key. Older builds stored the synthetic media
+        // key toggle there, and opting those users into private API would be a surprise.
+        static let pauseMediaNowPlaying = "pauseMediaNowPlaying"
     }
 
     private init() {
@@ -78,6 +96,10 @@ final class Settings {
         smartCleanup = defaults.object(forKey: Keys.smartCleanup) as? Bool ?? false
         compareMode = defaults.object(forKey: Keys.compareMode) as? Bool ?? false
         soundEnabled = defaults.object(forKey: Keys.soundEnabled) as? Bool ?? true
-        pauseMedia = defaults.object(forKey: Keys.pauseMedia) as? Bool ?? true
+        let savedPauseMedia = defaults.object(forKey: Keys.pauseMediaNowPlaying) as? Bool ?? false
+        pauseMedia = savedPauseMedia
+        muteMedia = savedPauseMedia
+            ? false
+            : defaults.object(forKey: Keys.muteMedia) as? Bool ?? false
     }
 }

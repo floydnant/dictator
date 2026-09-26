@@ -43,6 +43,8 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Dictator listens while you hold the push-to-talk key so it can turn your speech into text.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Dictator temporarily mutes other app audio while you dictate.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Dictator transcribes your speech on-device to insert text where you're typing.</string>
 </dict>

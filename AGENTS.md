@@ -73,22 +73,29 @@ compute with the clock started *after* model load. Wispr Flow's number is its ow
 `e2eLatency`, which includes a network round trip and its cleanup pass. Don't present them
 as one ranking.
 
-**The media pause sends a toggle, and every odd-looking guard around it is why.**
-`MediaPause` posts the system play/pause key, because that is the only mechanism that
-reaches browser video without an Automation prompt. The key is a toggle, so sending it when
-nothing is playing *starts* music. Hence: it fires only when `AudioActivity` reports a live
-output stream, it verifies the pause actually landed before it will ever queue a resume, and
-it sends the key a second time to undo itself when it didn't. Don't simplify any of the
-three away — the failure mode is the app blasting music at someone mid-sentence.
+**Optional media muting uses a Core Audio process tap.** The system play/pause key is a
+toggle aimed at whichever app owns media controls. That can differ from the process making
+sound, so posting the key can start an idle player or pause the wrong source. `MediaMute`
+creates a global tap with `.muted` behavior and excludes Dictator by bundle ID. Destroying
+the tap restores output without changing any player's playback state. Keep the tap global
+so sources that begin during dictation are silent too. Keep the setting off by default.
 
-Two measured numbers that the code depends on, both re-checkable with a `swiftc` harness
-over `AudioActivity.swift` + `MediaPause.swift`:
+`AudioActivity` still gates tap creation so Dictator does nothing when the machine is quiet.
+Its `kAudioProcessPropertyIsRunningOutput` signal stays true for about 2.5 seconds after
+playback stops. That lag is harmless here because creating a mute tap cannot start playback.
 
-- `kAudioProcessPropertyIsRunningOutput` stays `true` for **~2.5 s after playback stops**.
-  Any verification deadline shorter than that reports a good pause as a failure and undoes it.
-- `NSSound` output is attributed to **the playing process's own pid**, not to
-  `systemsoundserverd`. That is the only reason the app's own start/stop ticks don't look
-  like a stray app joining in and trip the undo.
+**Experimental pausing uses MediaRemote through `/usr/bin/osascript`.** macOS 15.4 and
+later deny MediaRemote access to normal third-party processes. Apple's `osascript` still has
+access, so `NowPlayingClient` runs a short JXA program there. It reads the active player and
+sends explicit pause or play commands. Do not link MediaRemote directly, and do not replace
+the commands with a synthetic media key.
+
+The state checks are the safety mechanism. `MediaPause` captures the active player's
+identity, pauses only when that player reports playback, and records a resume obligation
+only after observing it paused. It resumes only that identity. Operations stay serialized
+so a quick key release cannot race a late pause. Failed resumes remain queued for a later
+dictation stop. Pause and mute are separate settings, both off by default, and enabling one
+turns the other off.
 
 **`MainActor.assumeIsolated` will crash the process.** It does not check the claim, it
 asserts it. Use `await MainActor.run` from any non-main-actor context. This took the app

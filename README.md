@@ -110,13 +110,19 @@ transcript, because unstructured tasks have no ordering guarantee.
 tap the instant the callback returns. `AudioChunk`'s `@unchecked Sendable` is only sound
 because `AudioCapture` always allocates fresh storage before handing off.
 
-**Media pausing is a toggle aimed at a moving target.** `MediaPause` posts the system
-play/pause key, which reaches everything the media keys reach — including video in a browser
-tab, which no scripting approach covers without an Automation prompt. But it is a *toggle*,
-so sending it when nothing is playing starts music. `AudioActivity` is the guard: public
-CoreAudio process objects say which apps have a live output stream, and nothing is sent
-unless one does. `MediaRemote`, the obvious alternative, is private and entitlement-gated
-since macOS 15.4.
+**Optional media muting does not pause playback.** `AudioActivity` uses public Core Audio
+process objects to check whether another app has a live output stream. If it does,
+`MediaMute` creates a global Core Audio process tap with muted output and excludes Dictator
+itself. Destroying the tap on release restores sound without changing any player's playback
+state. The setting is off by default because the user misses whatever played while muted.
+Do not replace this with a synthetic play/pause key. That key is a toggle, and the app that
+owns it may not be the app making sound.
+
+**Media pausing uses the active Now Playing session.** `NowPlayingClient` runs MediaRemote
+calls inside Apple's `/usr/bin/osascript`, because macOS blocks direct access from normal
+processes. `MediaPause` sends explicit pause and play commands. It records the exact player
+identity and queues a resume only after observing that player pause. This is private API, so
+the setting is experimental and off by default. Pause and mute turn each other off.
 
 **Two swappable seams.** `TranscriptionEngine` and `TextFormatter` are protocols so the
 two components most likely to change can change without touching anything else.
@@ -131,7 +137,9 @@ Sources/Dictator/
 │   ├── HotkeyMonitor.swift         CGEventTap on .flagsChanged
 │   ├── AudioCapture.swift          AVAudioEngine tap + format conversion + RMS
 │   ├── AudioActivity.swift         which processes are playing audio (CoreAudio)
-│   ├── MediaPause.swift            pause playback while dictating, resume on release
+│   ├── MediaMute.swift             mute system output while dictating
+│   ├── MediaPause.swift            pause the active Now Playing session
+│   ├── NowPlayingClient.swift      MediaRemote bridge through osascript
 │   └── TextInjector.swift          AX insert, pasteboard+⌘V fallback
 ├── Transcription/
 │   ├── TranscriptionEngine.swift   protocol + AudioChunk

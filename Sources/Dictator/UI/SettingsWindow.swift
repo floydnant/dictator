@@ -71,9 +71,16 @@ struct SettingsWindow: View {
                         Silkscreen(text: "Pause media while dictating")
                     }
                     .toggleStyle(.switch)
-                    note("Sends the play/pause key when you start, and again when you let "
-                        + "go — but only if something was actually playing. Reaches anything "
-                        + "the media keys reach, including video in a browser tab.")
+                    note("Experimental. Pauses the active player and resumes only the same "
+                        + "player. Does not pause calls in known conferencing apps.")
+
+                    Toggle(isOn: $settings.muteMedia) {
+                        Silkscreen(text: "Mute all audio while dictating")
+                    }
+                    .toggleStyle(.switch)
+                    note("Mutes other apps while you hold the dictation key, without pausing "
+                        + "or resuming their players. Playback becomes audible again when you "
+                        + "let go.")
                 }
 
                 Spacer()
